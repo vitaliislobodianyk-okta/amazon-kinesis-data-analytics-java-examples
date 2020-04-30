@@ -4,9 +4,12 @@ import com.amazonaws.services.kinesisanalytics.runtime.KinesisAnalyticsRuntime;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisConsumer;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisProducer;
 import org.apache.flink.streaming.connectors.kinesis.config.ConsumerConfigConstants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Map;
@@ -17,43 +20,14 @@ import java.util.Properties;
  * streams as source and sink.
  */
 public class BasicStreamingJob {
-    private static final String region = "us-west-2";
-    private static final String inputStreamName = "ExampleInputStream";
-    private static final String outputStreamName = "ExampleOutputStream";
 
-    private static DataStream<String> createSourceFromStaticConfig(StreamExecutionEnvironment env) {
-        Properties inputProperties = new Properties();
-        inputProperties.setProperty(ConsumerConfigConstants.AWS_REGION, region);
-        inputProperties.setProperty(ConsumerConfigConstants.STREAM_INITIAL_POSITION, "LATEST");
-
-        return env.addSource(new FlinkKinesisConsumer<>(inputStreamName, new SimpleStringSchema(), inputProperties));
-    }
+    private static final Logger LOG = LoggerFactory.getLogger(BasicStreamingJob.class);
 
     private static DataStream<String> createSourceFromApplicationProperties(StreamExecutionEnvironment env) throws IOException {
         Map<String, Properties> applicationProperties = KinesisAnalyticsRuntime.getApplicationProperties();
-        return env.addSource(new FlinkKinesisConsumer<>(inputStreamName, new SimpleStringSchema(),
-                applicationProperties.get("ConsumerConfigProperties")));
-    }
-
-    private static FlinkKinesisProducer<String> createSinkFromStaticConfig() {
-        Properties outputProperties = new Properties();
-        outputProperties.setProperty(ConsumerConfigConstants.AWS_REGION, region);
-        outputProperties.setProperty("AggregationEnabled", "false");
-
-        FlinkKinesisProducer<String> sink = new FlinkKinesisProducer<>(new SimpleStringSchema(), outputProperties);
-        sink.setDefaultStream(outputStreamName);
-        sink.setDefaultPartition("0");
-        return sink;
-    }
-
-    private static FlinkKinesisProducer<String> createSinkFromApplicationProperties() throws IOException {
-        Map<String, Properties> applicationProperties = KinesisAnalyticsRuntime.getApplicationProperties();
-        FlinkKinesisProducer<String> sink = new FlinkKinesisProducer<>(new SimpleStringSchema(),
-                applicationProperties.get("ProducerConfigProperties"));
-
-        sink.setDefaultStream(outputStreamName);
-        sink.setDefaultPartition("0");
-        return sink;
+        Properties consumerConfigProperties = applicationProperties.get("ConsumerProperties");
+        String inputStreamName = consumerConfigProperties.getProperty("input.stream.name");
+        return env.addSource(new FlinkKinesisConsumer<>(inputStreamName, new SimpleStringSchema(), consumerConfigProperties));
     }
 
     public static void main(String[] args) throws Exception {
@@ -63,12 +37,17 @@ public class BasicStreamingJob {
         /* if you would like to use runtime configuration properties, uncomment the lines below
          * DataStream<String> input = createSourceFromApplicationProperties(env);
          */
-        DataStream<String> input = createSourceFromStaticConfig(env);
+        DataStream<String> input = createSourceFromApplicationProperties(env);
 
         /* if you would like to use runtime configuration properties, uncomment the lines below
          * input.addSink(createSinkFromApplicationProperties())
          */
-        input.addSink(createSinkFromStaticConfig());
+        input.addSink(new SinkFunction<String>() {
+            @Override
+            public void invoke(String value, Context context) throws Exception {
+                LOG.info("Processed");
+            }
+        });
 
         env.execute("Flink Streaming Java API Skeleton");
     }
